@@ -1,0 +1,27 @@
+name: Run Bot
+
+on:
+  workflow_dispatch:   # permite rodar manualmente na aba Actions
+  schedule:
+    - cron: "*/5 * * * *"   # executa a cada 5 minutos
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run bot
+        env:
+          IQ_EMAIL: ${{ secrets.IQ_EMAIL }}
+          IQ_PASSWORD: ${{ secrets.IQ_PASSWORD }}
+        run: python bot.py
