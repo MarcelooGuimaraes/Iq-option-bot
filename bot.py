@@ -1,56 +1,57 @@
-from iqoptionapi.stable_api import IQ_Option
+import os
 import time
 import numpy as np
+from iqoptionapi.stable_api import IQ_Option
 
 # ======================
 # Conexão
 # ======================
-I_want_money = IQ_Option("email", "senha")
+email = os.getenv("IQ_EMAIL")
+senha = os.getenv("IQ_PASSWORD")
+
+print("🔗 Conectando na IQ Option...")
+I_want_money = IQ_Option(email, senha)
 I_want_money.connect()
-I_want_money.change_balance("PRACTICE")  # PRACTICE ou REAL
+I_want_money.change_balance("PRACTICE")  # segurança: apenas conta demo
+print("✅ Conectado:", I_want_money.check_connect())
 
 # ======================
 # Configurações
 # ======================
 PAR = "EURUSD"
-TIMEFRAME = 1
-ENTRADA_INICIAL = 20
-STOP_WIN = 200
-STOP_LOSS = -100
-SOROS_MAX = 2
+TIMEFRAME = 1  # M1
+ENTRADA = 20
+SOROS_MAOS = 2
+STOP_GAIN = 200
+STOP_LOSS = 100
 
-# Controle de banca
-lucro = 0
+lucro_total = 0
 soros_mao = 0
-valor_entrada = ENTRADA_INICIAL
 
 # ======================
-# Estratégia simples (EMA + RSI)
+# Funções auxiliares
 # ======================
-def EMA(values, period):
-    return np.mean(values[-period:]) if len(values) >= period else None
+def ema(values, period):
+    return np.mean(values[-period:])
 
-def RSI(values, period=14):
-    if len(values) < period + 1:
-        return None
+def rsi(values, period=14):
     deltas = np.diff(values)
-    ganhos = deltas[deltas > 0].sum() / period
-    perdas = -deltas[deltas < 0].sum() / period
-    rs = ganhos / perdas if perdas != 0 else 0
+    ups = deltas[deltas > 0].sum() / period
+    downs = -deltas[deltas < 0].sum() / period
+    rs = ups / downs if downs != 0 else 0
     return 100 - (100 / (1 + rs))
 
 def estrategia(candles):
-    closes = [c['close'] for c in candles]
-    ema5 = EMA(closes, 5)
-    ema12 = EMA(closes, 12)
-    rsi = RSI(closes, 14)
+    closes = [c["close"] for c in candles]
+    ema5 = ema(closes, 5)
+    ema12 = ema(closes, 12)
+    rsi_val = rsi(np.array(closes))
 
-    if not ema5 or not ema12 or not rsi:
-        return None
+    print(f"📊 EMA5={ema5:.5f} | EMA12={ema12:.5f} | RSI={rsi_val:.2f}")
 
-    if ema5 > ema12 and rsi > 50:
+    if ema5 > ema12 and rsi_val > 50:
         return "call"
-    if ema5 < ema12 and rsi < 50:
+    elif ema5 < ema12 and rsi_val < 50:
         return "put"
     return None
 
@@ -58,40 +59,38 @@ def estrategia(candles):
 # Loop principal
 # ======================
 while True:
-    if lucro >= STOP_WIN:
-        print(f"[STOP WIN] Meta de lucro alcançada: {lucro}")
+    if lucro_total >= STOP_GAIN:
+        print("🏆 Stop Gain atingido! Lucro:", lucro_total)
         break
-    if lucro <= STOP_LOSS:
-        print(f"[STOP LOSS] Limite de perda atingido: {lucro}")
+    if abs(lucro_total) >= STOP_LOSS:
+        print("❌ Stop Loss atingido! Perda:", lucro_total)
         break
 
-    candles = I_want_money.get_candles(PAR, 60, 100, time.time())
+    candles = I_want_money.get_candles(PAR, 60, 20, time.time())
     direcao = estrategia(candles)
 
     if direcao:
+        valor_entrada = ENTRADA if soros_mao == 0 else ENTRADA + lucro_total
+        print(f"🎯 Entrada: {valor_entrada} | Direção: {direcao.upper()} | Soros mão {soros_mao+1}")
+
         status, id = I_want_money.buy(valor_entrada, PAR, direcao, TIMEFRAME)
-        print(f"[ORDEM] {direcao.upper()} | Valor: {valor_entrada} | Status: {status} | ID: {id}")
-
         if status:
-            # aguarda resultado
-            time.sleep(60)
+            print("📌 Ordem enviada! ID:", id)
+            # espera expiração da ordem
+            time.sleep(70)
             resultado = I_want_money.check_win_v3(id)
+            print("📈 Resultado:", resultado)
 
+            lucro_total += resultado
             if resultado > 0:
-                lucro += resultado
                 soros_mao += 1
-                print(f"[WIN] Lucro: {resultado:.2f} | Banca: {lucro:.2f}")
-
-                if soros_mao <= SOROS_MAX:
-                    valor_entrada = ENTRADA_INICIAL + resultado  # reinvestindo lucro (soros)
-                    print(f"[SOROS] Indo para mão {soros_mao} com {valor_entrada}")
-                else:
-                    valor_entrada = ENTRADA_INICIAL
+                if soros_mao >= SOROS_MAOS:
                     soros_mao = 0
             else:
-                lucro += resultado
-                print(f"[LOSS] Perdeu: {resultado:.2f} | Banca: {lucro:.2f}")
-                valor_entrada = ENTRADA_INICIAL
                 soros_mao = 0
+        else:
+            print("⚠️ Erro ao enviar ordem")
+    else:
+        print("⏭️ Nenhum sinal, aguardando...")
 
     time.sleep(5)
